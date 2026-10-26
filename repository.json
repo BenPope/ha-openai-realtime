@@ -1,12 +1,12 @@
 {
   "name": "Home Assistant OpenAI Realtime Voice Agent",
-  "url": "https://github.com/foeken/ha-openai-realtime",
-  "maintainer": "Andre Foeken",
+  "url": "https://github.com/BenPope/ha-openai-realtime",
+  "maintainer": "Ben Pope",
   "addons": [
     {
       "slug": "openai_realtime_voice_agent",
       "name": "OpenAI Realtime Voice Agent",
-      "version": "0.2.5"
+      "version": "0.2.8"
     }
   ]
 }

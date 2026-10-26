@@ -1,8 +1,8 @@
 name: OpenAI Realtime Voice Agent
-version: "0.2.7"
+version: "0.2.8"
 slug: openai_realtime_voice_agent
 description: Voice control using OpenAI Realtime API with WebSocket support for ESP32 devices
-url: https://github.com/foeken/ha-openai-realtime
+url: https://github.com/BenPope/ha-openai-realtime
 arch:
   - aarch64
   - amd64
@@ -11,6 +11,7 @@ startup: application
 boot: auto
 host_network: true
 options:
+  realtime_ws_base_url: "wss://api.openai.com/v1/realtime"
   openai_api_key: ""
   websocket_port: 8080
   ha_mcp_url: ""
@@ -39,6 +40,7 @@ options:
   # Audio recording (optional, for debugging)
   enable_recording: false
 schema:
+  realtime_ws_base_url: str
   openai_api_key: password
   websocket_port: int(1024,65535)
   ha_mcp_url: str
@@ -60,4 +62,4 @@ schema:
   auto_disconnect_after_response_seconds: float(-1.0,30.0)
   session_reuse_timeout_seconds: int(0,3600)
   enable_recording: bool
-image: ghcr.io/foeken/ha-openai-realtime/openai-realtime-voice-agent-{arch}
+image: ghcr.io/benpope/ha-openai-realtime/openai-realtime-voice-agent-{arch}

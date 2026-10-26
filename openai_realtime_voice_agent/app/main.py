@@ -442,6 +442,7 @@ class Application:
     async def initialize(self) -> None:
         """Initialize all components."""
         # Get configuration from environment
+        realtime_ws_base_url = os.environ.get("REALTIME_WS_BASE_URL")
         openai_api_key = os.environ.get("OPENAI_API_KEY")
         websocket_port = int(os.environ.get("WEBSOCKET_PORT", "8080"))
         websocket_host = os.environ.get("WEBSOCKET_HOST", "0.0.0.0")
@@ -508,6 +509,7 @@ class Application:
         )
         
         # Store configuration for session creation
+        self.realtime_ws_base_url = realtime_ws_base_url
         self.openai_api_key = openai_api_key
         self.websocket_host = websocket_host
         self.websocket_port = websocket_port
@@ -736,6 +738,7 @@ class Application:
         )
 
         service = PatchedOpenAIRealtimeLLMService(
+            base_url=self.realtime_ws_base_url,
             api_key=self.openai_api_key,
             model=self.openai_realtime_model,
             session_properties=session_properties,

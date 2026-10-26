@@ -2,6 +2,7 @@
 set -e
 
 # Get configuration
+REALTIME_WS_BASE_URL=$(bashio::config 'realtime_ws_base_url')
 OPENAI_API_KEY=$(bashio::config 'openai_api_key')
 WEBSOCKET_PORT=$(bashio::config 'websocket_port')
 HA_MCP_URL=$(bashio::config 'ha_mcp_url')
@@ -43,6 +44,7 @@ if [ -z "$OPENAI_API_KEY" ]; then
 fi
 
 # Export environment variables
+export REALTIME_WS_BASE_URL
 export OPENAI_API_KEY
 export WEBSOCKET_PORT
 export LONGLIVED_TOKEN
