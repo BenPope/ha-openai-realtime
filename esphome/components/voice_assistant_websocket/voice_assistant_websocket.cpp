@@ -98,7 +98,7 @@ void VoiceAssistantWebSocket::loop() {
     this->reconnect_pending_ = false;
     this->last_reconnect_attempt_ = millis();
     this->reconnect_attempts_++;
-    ESP_LOGW(TAG, "Attempting to reconnect (attempt %u/%u)...", this->reconnect_attempts_, MAX_RECONNECT_ATTEMPTS);
+    ESP_LOGW(TAG, "Attempting to reconnect (attempt %n/%n)...", this->reconnect_attempts_, MAX_RECONNECT_ATTEMPTS);
     this->connect_websocket_();
   }
   

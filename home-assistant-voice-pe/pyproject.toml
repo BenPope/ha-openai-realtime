@@ -7,16 +7,11 @@ readme = "INSTALLATION.md"
 package-mode = false
 
 [tool.poetry.dependencies]
-python = ">=3.11,<3.14"
+python = "<3.15,>=3.12.0"
 
 [tool.poetry.group.dev.dependencies]
-esphome = "^2025.11.4"
+esphome = "^2026.10.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
-
-
-
-
-

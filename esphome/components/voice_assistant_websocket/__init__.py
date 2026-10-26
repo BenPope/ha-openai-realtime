@@ -48,14 +48,14 @@ async def to_code(config):
     await cg.register_component(var, config)
     
     # Add ESP-IDF components
-    if CORE.using_esp_idf:
+    if CORE.is_esp32:
         # WebSocket client component
         # Note: esp_websocket_client is a subdirectory in esp-protocols
         # We need to add the entire repository and reference the component path
         add_idf_component(
             name="esp-protocols",
             repo="https://github.com/espressif/esp-protocols.git",
-            ref="websocket-v1.6.0",
+            ref="websocket-v1.6.1",
             path="components/esp_websocket_client"
         )
     
