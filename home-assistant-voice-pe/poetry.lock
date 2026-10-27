@@ -1273,14 +1273,14 @@ test = ["pytest"]
 
 [[package]]
 name = "esphome"
-version = "2026.10.0"
+version = "2026.10.1"
 description = "ESPHome is a system to configure your microcontrollers by simple yet powerful configuration files and control them remotely through Home Automation systems."
 optional = false
 python-versions = "<3.15,>=3.12.0"
 groups = ["dev"]
 files = [
-    {file = "esphome-2026.10.0-py3-none-any.whl", hash = "sha256:4f6d8c851602d17fb83e8f91870d7299dd718c8a6a6e9f53f50bde098ccbbea3"},
-    {file = "esphome-2026.10.0.tar.gz", hash = "sha256:a583830d20cb64f059a5d06a25df3099679cbb2bbc798a969da959cf5027a1aa"},
+    {file = "esphome-2026.10.1-py3-none-any.whl", hash = "sha256:8bb771478f9557f131d7de40046ac419695e8797043ced9d41675aef1094b6c6"},
+    {file = "esphome-2026.10.1.tar.gz", hash = "sha256:c970e3790c0d8d09c077fa620a7114e104da5722d59ac06a02b9ac465e4a6c96"},
 ]
 
 [package.dependencies]
