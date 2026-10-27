@@ -123,7 +123,7 @@ class VoiceAssistantWebSocket : public Component {
   
   // Audio conversion buffers
   std::vector<int16_t> mono_buffer_;  // For stereo to mono conversion (input)
-  std::vector<int16_t> resampled_buffer_;  // For 16kHz -> 24kHz resampling (1.5x upsampling)
+  std::vector<int16_t> resampled_buffer_;  // For 16kHz -> 24kHz resampling (3x upsampling)
   std::vector<uint8_t> output_stereo_buffer_;  // For output processing (24kHz mono -> 48kHz stereo, 16-bit)
   
   bool pending_start_{false};

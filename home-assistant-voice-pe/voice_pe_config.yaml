@@ -68,10 +68,12 @@ api:
   encryption:
     key: !secret api_encryption
   on_client_connected:
-    - lambda: id(init_in_progress) = false;
-    - script.execute: control_leds
+    - lambda: |-
+        id(init_in_progress) = false;
+        id(voice_assistant_phase) = ${voice_assist_idle_phase_id};
     - micro_wake_word.start:
         id: mww
+    - script.execute: control_leds
   on_client_disconnected:
     - script.execute: control_leds
 
@@ -570,21 +572,22 @@ script:
           }
 
 i2s_audio:
-  - id: i2s_input
-    i2s_mclk_pin: GPIO12
-    i2s_bclk_pin:
-      number: GPIO13
-      allow_other_uses: true
-    i2s_lrclk_pin:
-      number: GPIO14
-      allow_other_uses: true
-
   - id: i2s_output
+    i2s_lrclk_pin:
+      number: GPIO14
+      allow_other_uses: true
     i2s_bclk_pin:
       number: GPIO13
       allow_other_uses: true
+    i2s_mclk_pin:
+      number: GPIO12
+
+  - id: i2s_input
     i2s_lrclk_pin:
       number: GPIO14
+      allow_other_uses: true
+    i2s_bclk_pin:
+      number: GPIO13
       allow_other_uses: true
 
 audio_adc:
@@ -601,8 +604,6 @@ audio_dac:
     use_mclk: true
     sample_rate: 16000
     bits_per_sample: 16bit
-    force_master: true
-    mclk_multiple: 256
 
 microphone:
   - platform: i2s_audio
@@ -614,9 +615,7 @@ microphone:
     i2s_mode: primary
     sample_rate: 16000
     bits_per_sample: 16bit
-    use_apll: true
-    mclk_multiple: 256
-    channel: left
+    # use_apll: true
 
 speaker:
   - platform: i2s_audio
@@ -628,10 +627,10 @@ speaker:
     i2s_audio_id: i2s_output
     dac_type: external
     audio_dac: es8311_dac
-    channel: stereo
+    # channel: stereo
     timeout: never
     buffer_duration: 100ms
-    use_apll: true
+    # use_apll: true
     mclk_multiple: 256
 
   - platform: mixer
@@ -647,15 +646,18 @@ speaker:
   - platform: resampler
     id: announcement_resampling_speaker
     output_speaker: announcement_mixing_input
-    sample_rate: 48000
-    bits_per_sample: 16
+    sample_rate: 16000
 
   - platform: resampler
     id: voice_resampling_speaker
     output_speaker: announcement_mixing_input
-    sample_rate: 48000
-    bits_per_sample: 16
-    buffer_duration: 500ms
+    sample_rate: 16000
+    buffer_duration: 100ms
+
+  - platform: resampler
+    id: media_resampling_speaker
+    output_speaker: media_mixing_input
+    sample_rate: 16000
 
 media_player:
   - platform: speaker
@@ -671,7 +673,7 @@ media_player:
       num_channels: 1
       sample_rate: 24000
     media_pipeline:
-      speaker: media_mixing_input
+      speaker: media_resampling_speaker
       format: FLAC
       num_channels: 2
       sample_rate: 48000
@@ -749,14 +751,6 @@ micro_wake_word:
                     wake_word: !lambda "return wake_word;"
 
 external_components:
-  # ES8311 Speaker DAC (using external component from Waveshare repo)
-  - source:
-      type: git
-      url: "https://github.com/sw3Dan/waveshare-s2-audio_esphome_voice"
-      ref: main
-    components: [es8311]
-    refresh: 0s
-
   - source:
       type: git
       url: "https://github.com/BenPope/ha-openai-realtime"
@@ -767,7 +761,7 @@ voice_assistant_websocket:
   id: voice_assistant_ws
   server_url: !secret server_url
   client_id: ${satellite_id}
-  input_channel: average
+  input_channel: right
   microphone: i2s_mics
   speaker: voice_resampling_speaker
 

@@ -119,6 +119,7 @@ VOICE_ASSISTANT_WEBSOCKET_CONDITION_SCHEMA = maybe_simple_id(
     "voice_assistant_websocket.start",
     voice_assistant_websocket_ns.class_("VoiceAssistantWebSocketStartAction"),
     VOICE_ASSISTANT_WEBSOCKET_START_ACTION_SCHEMA,
+    synchronous=False,
 )
 async def voice_assistant_websocket_start_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
@@ -132,6 +133,7 @@ async def voice_assistant_websocket_start_to_code(config, action_id, template_ar
     "voice_assistant_websocket.stop",
     voice_assistant_websocket_ns.class_("VoiceAssistantWebSocketStopAction"),
     VOICE_ASSISTANT_WEBSOCKET_ACTION_SCHEMA,
+    synchronous=False,
 )
 async def voice_assistant_websocket_stop_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
@@ -162,6 +164,7 @@ async def voice_assistant_websocket_is_connected_to_code(config, condition_id, t
     "voice_assistant_websocket.interrupt",
     voice_assistant_websocket_ns.class_("VoiceAssistantWebSocketInterruptAction"),
     VOICE_ASSISTANT_WEBSOCKET_ACTION_SCHEMA,
+    synchronous=False,
 )
 async def voice_assistant_websocket_interrupt_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])

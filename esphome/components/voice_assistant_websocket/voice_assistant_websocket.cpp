@@ -539,72 +539,62 @@ void VoiceAssistantWebSocket::process_received_audio_(const uint8_t *data, size_
   }
 }
 
-void VoiceAssistantWebSocket::on_microphone_data_(const std::vector<uint8_t> &data) {
-  // Only process if connected and running
-  if (!this->is_connected() || this->state_ != VOICE_ASSISTANT_WEBSOCKET_RUNNING) {
+void VoiceAssistantWebSocket::on_microphone_data_(
+    const std::vector<uint8_t> &data) {
+
+  if (!this->is_connected() ||
+      this->state_ != VOICE_ASSISTANT_WEBSOCKET_RUNNING) {
     return;
   }
-  
-  // Block microphone audio if bot is currently speaking
+
   if (this->is_bot_speaking()) {
-    return;  // Don't send microphone audio while bot is speaking
+    return;
   }
-  
-  // Microphone is configured for 16kHz, 32-bit, stereo (required by micro_wake_word)
-  // OpenAI expects 24kHz, 16-bit, mono (non-beta API requirement)
-  // Convert: selected 32-bit stereo channel -> 16-bit mono (16kHz) -> resample to 24kHz
-  
-  size_t stereo_32bit_samples = data.size() / (4 * 2);  // 4 bytes per 32-bit sample, 2 channels
-  size_t mono_16khz_samples = stereo_32bit_samples;
-  
-  if (this->mono_buffer_.size() < mono_16khz_samples) {
-    this->mono_buffer_.resize(mono_16khz_samples);
+
+  // Input: 16 kHz, signed 16-bit, mono PCM
+  if (data.empty() || data.size() % sizeof(int16_t) != 0) {
+    return;
   }
-  
-  const int32_t *stereo_32bit = reinterpret_cast<const int32_t *>(data.data());
-  int16_t *mono_16bit = this->mono_buffer_.data();
-  
-  for (size_t i = 0; i < stereo_32bit_samples; i++) {
-    int32_t left_sample = stereo_32bit[i * 2];
-    int32_t right_sample = stereo_32bit[(i * 2) + 1];
-    int32_t selected_sample;
-    if (this->input_channel_mode_ == 1) {
-      selected_sample = right_sample;
-    } else if (this->input_channel_mode_ == 2) {
-      selected_sample = (left_sample / 2) + (right_sample / 2);
-    } else {
-      selected_sample = left_sample;
-    }
-    mono_16bit[i] = static_cast<int16_t>(selected_sample >> 16);
+
+  const size_t input_samples = data.size() / sizeof(int16_t);
+
+  // Decode the PCM bytes into signed 16-bit samples.
+  this->mono_buffer_.resize(input_samples);
+  std::memcpy(
+      this->mono_buffer_.data(),
+      data.data(),
+      data.size()
+  );
+
+  // Resample 16 kHz -> 24 kHz (ratio 3:2).
+  const size_t output_samples =
+      input_samples * INPUT_SAMPLE_RATE / MICROPHONE_SAMPLE_RATE;
+
+  this->resampled_buffer_.resize(output_samples);
+
+  for (size_t i = 0; i < output_samples; ++i) {
+    // Exact fractional source position: i * 2 / 3
+    const size_t numerator = i * MICROPHONE_SAMPLE_RATE;
+    const size_t idx = numerator / INPUT_SAMPLE_RATE;
+    const float fraction =
+        float(numerator % INPUT_SAMPLE_RATE) / INPUT_SAMPLE_RATE;
+
+    const int32_t a = this->mono_buffer_[idx];
+    const int32_t b = this->mono_buffer_[
+        std::min(idx + 1, input_samples - 1)
+    ];
+
+    this->resampled_buffer_[i] =
+        static_cast<int16_t>(a + (b - a) * fraction);
   }
-  
-  // Resample from 16kHz to 24kHz (1.5x upsampling)
-  size_t resampled_24khz_samples = (mono_16khz_samples * INPUT_SAMPLE_RATE) / MICROPHONE_SAMPLE_RATE;
-  if (this->resampled_buffer_.size() < resampled_24khz_samples) {
-    this->resampled_buffer_.resize(resampled_24khz_samples);
-  }
-  
-  int16_t *resampled_24khz = this->resampled_buffer_.data();
-  
-  // Linear interpolation resampling: 16kHz -> 24kHz
-  for (size_t i = 0; i < resampled_24khz_samples; i++) {
-    float source_pos = (float)i * (float)MICROPHONE_SAMPLE_RATE / (float)INPUT_SAMPLE_RATE;
-    size_t source_idx = (size_t)source_pos;
-    float fraction = source_pos - source_idx;
-    
-    if (source_idx + 1 < mono_16khz_samples) {
-      int16_t sample0 = mono_16bit[source_idx];
-      int16_t sample1 = mono_16bit[source_idx + 1];
-      resampled_24khz[i] = static_cast<int16_t>(sample0 + (sample1 - sample0) * fraction);
-    } else if (source_idx < mono_16khz_samples) {
-      resampled_24khz[i] = mono_16bit[source_idx];
-    } else {
-      resampled_24khz[i] = mono_16bit[mono_16khz_samples - 1];
-    }
-  }
-  
-  size_t resampled_bytes = resampled_24khz_samples * BYTES_PER_SAMPLE;
-  this->send_audio_chunk_(reinterpret_cast<const uint8_t *>(resampled_24khz), resampled_bytes);
+
+  // send_audio_chunk_ expects BYTES, not samples.
+  this->send_audio_chunk_(
+      reinterpret_cast<const uint8_t *>(
+          this->resampled_buffer_.data()
+      ),
+      output_samples * sizeof(int16_t)
+  );
 }
 
 bool VoiceAssistantWebSocket::is_bot_speaking() const {
