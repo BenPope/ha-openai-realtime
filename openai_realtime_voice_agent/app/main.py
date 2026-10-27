@@ -101,14 +101,19 @@ class PatchedOpenAIRealtimeLLMService(OpenAIRealtimeLLMService):
             elif evt.type == "response.output_audio.done":
                 await self._handle_evt_audio_done(evt)
             elif evt.type == "conversation.item.added":
+                evt.item_id = evt.item.id if hasattr(evt, "item") and hasattr(evt.item, "id") else None
                 await self._handle_evt_conversation_item_added(evt)
             elif evt.type == "conversation.item.done":
+                evt.item_id = evt.item.id if hasattr(evt, "item") and hasattr(evt.item, "id") else None
                 await self._handle_evt_conversation_item_done(evt)
             elif evt.type == "conversation.item.input_audio_transcription.delta":
+                evt.item_id = evt.item.id if hasattr(evt, "item") and hasattr(evt.item, "id") else None
                 await self._handle_evt_input_audio_transcription_delta(evt)
             elif evt.type == "conversation.item.input_audio_transcription.completed":
+                evt.item_id = evt.item.id if hasattr(evt, "item") and hasattr(evt.item, "id") else None
                 await self.handle_evt_input_audio_transcription_completed(evt)
             elif evt.type == "conversation.item.retrieved":
+                evt.item_id = evt.item.id if hasattr(evt, "item") and hasattr(evt.item, "id") else None
                 await self._handle_conversation_item_retrieved(evt)
             elif evt.type == "response.done":
                 await self._handle_evt_response_done(evt)
