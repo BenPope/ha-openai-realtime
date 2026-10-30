@@ -121,11 +121,6 @@ class VoiceAssistantWebSocket : public Component {
   static const uint32_t AUTO_STOP_INACTIVITY_MS = 20000;  // Stop after 20 seconds of speaker inactivity
   static const uint32_t NO_RESPONSE_TIMEOUT_MS = 20000;  // Stop if no assistant audio arrives after wake
   
-  // Audio conversion buffers
-  std::vector<int16_t> mono_buffer_;  // For stereo to mono conversion (input)
-  std::vector<int16_t> resampled_buffer_;  // For 16kHz -> 24kHz resampling (3x upsampling)
-  std::vector<uint8_t> output_stereo_buffer_;  // For output processing (24kHz mono -> 48kHz stereo, 16-bit)
-  
   bool pending_start_{false};
   bool pending_disconnect_{false};  // Flag to disconnect in loop() (cannot be called from websocket task)
   bool reconnect_pending_{false};

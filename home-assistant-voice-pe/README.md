@@ -32,7 +32,11 @@ Edit `secrets.yaml`:
 - `wifi_password`: Your WiFi password
 - `api_encryption_key`: Home Assistant API encryption key
 - `ota_password`: Password for OTA updates
-- `server_url`: WebSocket URL for the OpenAI Realtime addon (e.g., `ws://homeassistant.local:8080`)
+- `server_url`: Initial WebSocket URL for the OpenAI Realtime addon (e.g., `ws://homeassistant.local:8080`)
+
+After flashing, change the **Realtime Server URL** text entity in Home Assistant
+to update the endpoint without reflashing. The device saves the value across
+reboots; `server_url` in `secrets.yaml` is only used as the initial value.
 
 ### 3. Compile and Flash
 
@@ -69,7 +73,6 @@ The main configuration file is `voice_pe_config.yaml`. Key settings:
 
 ### Connection Issues
 
-- **Device doesn't connect**: Check `server_url` in `secrets.yaml` matches your addon configuration
+- **Device doesn't connect**: Check the **Realtime Server URL** entity in Home Assistant matches your addon configuration
 - **No audio**: Check hardware mute switch and verify microphone initialization in logs
 - **View logs**: `poetry run esphome logs voice_pe_config.yaml`
-

@@ -1,37 +1,47 @@
 """Main application entry point using Pipecat."""
-import os
-import sys
+
 import asyncio
 import json
 import logging
+import os
+import sys
+import uuid
+from collections.abc import Callable
 from contextlib import suppress
-from typing import Callable, Literal, Optional
+from typing import Literal, Optional
 from urllib.parse import parse_qs, urlparse
+
 import dotenv
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
-from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.adapters.llm.schemas.tools_schema import ToolsSchema
 from pipecat.frames.frames import UserStartedSpeakingFrame, UserStoppedSpeakingFrame
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.openai.realtime import events as realtime_events
 from pipecat.services.openai.realtime.llm import OpenAIRealtimeLLMService
 from pipecat.transports.websocket.server import WebsocketServerParams
 from websockets.asyncio.client import connect as websocket_connect
 from websockets.asyncio.server import serve as websocket_serve
-from app.agent_config import AgentProfile, AgentRegistry, load_agent_registry, normalize_route_key
-from app.client_websocket_transport import ClientWebsocketTransport
-from app.mcp_service import HomeAssistantMCPService
-from app.disconnect_tool import get_disconnect_tool_definition, create_disconnect_tool_handler
+
+from app.agent_config import (
+    AgentProfile,
+    AgentRegistry,
+    load_agent_registry,
+    normalize_route_key,
+)
 from app.audio_recording_service import AudioRecordingService
+from app.client_websocket_transport import ClientWebsocketTransport
+from app.config import load_addon_config_into_environment
+from app.disconnect_tool import (
+    create_disconnect_tool_handler,
+    get_disconnect_tool_definition,
+)
+from app.mcp_service import HomeAssistantMCPService
 from app.raw_audio_serializer import RawAudioSerializer
 from app.session_manager import SessionManager
 from app.websocket_handler import SessionAutoDisconnect, WebSocketHandler
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -41,6 +51,7 @@ logging.getLogger("websockets").setLevel(logging.WARNING)
 logging.getLogger("__main__").setLevel(logging.INFO)
 
 dotenv.load_dotenv()
+load_addon_config_into_environment()
 
 
 DEFAULT_INSTRUCTIONS = (
@@ -91,6 +102,10 @@ class PatchedOpenAIRealtimeLLMService(OpenAIRealtimeLLMService):
 
     async def _receive_task_handler(self):
         async for message in self._websocket:
+            event_data = json.loads(message)
+            if not event_data.get("event_id"):
+                event_data["event_id"] = f"localai_{uuid.uuid4().hex}"
+                message = json.dumps(event_data)
             evt = realtime_events.parse_server_event(message)
             if evt.type == "session.created":
                 await self._handle_evt_session_created(evt)
@@ -98,22 +113,22 @@ class PatchedOpenAIRealtimeLLMService(OpenAIRealtimeLLMService):
                 await self._handle_evt_session_updated(evt)
             elif evt.type == "response.output_audio.delta":
                 await self._handle_evt_audio_delta(evt)
-            elif evt.type == "response.output_audio.done":
-                await self._handle_evt_audio_done(evt)
+            elif evt.type == "response.output_item.added":
+                await self._handle_evt_conversation_item_added(evt)
             elif evt.type == "conversation.item.added":
-                evt.item_id = evt.item.id if hasattr(evt, "item") and hasattr(evt.item, "id") else None
+                evt = self._with_item_id(evt)
                 await self._handle_evt_conversation_item_added(evt)
             elif evt.type == "conversation.item.done":
-                evt.item_id = evt.item.id if hasattr(evt, "item") and hasattr(evt.item, "id") else None
+                evt = self._with_item_id(evt)
                 await self._handle_evt_conversation_item_done(evt)
             elif evt.type == "conversation.item.input_audio_transcription.delta":
-                evt.item_id = evt.item.id if hasattr(evt, "item") and hasattr(evt.item, "id") else None
+                evt = self._with_item_id(evt)
                 await self._handle_evt_input_audio_transcription_delta(evt)
             elif evt.type == "conversation.item.input_audio_transcription.completed":
-                evt.item_id = evt.item.id if hasattr(evt, "item") and hasattr(evt.item, "id") else None
+                evt = self._with_item_id(evt)
                 await self.handle_evt_input_audio_transcription_completed(evt)
             elif evt.type == "conversation.item.retrieved":
-                evt.item_id = evt.item.id if hasattr(evt, "item") and hasattr(evt.item, "id") else None
+                evt = self._with_item_id(evt)
                 await self._handle_conversation_item_retrieved(evt)
             elif evt.type == "response.done":
                 await self._handle_evt_response_done(evt)
@@ -136,17 +151,24 @@ class PatchedOpenAIRealtimeLLMService(OpenAIRealtimeLLMService):
                 if fatal:
                     return
 
+    @staticmethod
+    def _with_item_id(evt):
+        item = getattr(evt, "item", None)
+        return evt.model_copy(update={"item_id": getattr(item, "id", None)})
+
     async def start(self, frame):
         """Start the processor without opening an idle Realtime websocket."""
         await super(OpenAIRealtimeLLMService, self).start(frame)
 
-    async def _handle_context(self, context):
+    async def _handle_context(self, context, direction=None):
         if not self._context:
             self._context = context
             await self._process_completed_function_calls(send_new_results=False)
             if self._is_live_audio_session_active():
                 self._llm_needs_conversation_setup = False
-                logger.debug("%s using live Realtime audio context without replay", self)
+                logger.debug(
+                    "%s using live Realtime audio context without replay", self
+                )
                 return
 
             await self._create_response()
@@ -160,7 +182,9 @@ class PatchedOpenAIRealtimeLLMService(OpenAIRealtimeLLMService):
     async def send_client_event(self, event):
         payload = event.model_dump(exclude_none=True)
         if payload.get("type") == "session.update":
-            self._deep_merge(payload.setdefault("session", {}), self._session_update_patch)
+            self._deep_merge(
+                payload.setdefault("session", {}), self._session_update_patch
+            )
         await self._ws_send(payload)
 
     async def _handle_evt_error(self, evt):
@@ -179,7 +203,9 @@ class PatchedOpenAIRealtimeLLMService(OpenAIRealtimeLLMService):
             and "Audio content of" in evt.error.message
             and "already shorter than" in evt.error.message
         ):
-            logger.debug("%s ignoring stale audio truncate error: %s", self, evt.error.message)
+            logger.debug(
+                "%s ignoring stale audio truncate error: %s", self, evt.error.message
+            )
             self._current_audio_response = None
             return False
 
@@ -274,7 +300,9 @@ class PatchedOpenAIRealtimeLLMService(OpenAIRealtimeLLMService):
     def _extract_assistant_response_text(self, response):
         parts = []
         for item in response.output or []:
-            if getattr(item, "role", None) != "assistant" or not getattr(item, "content", None):
+            if getattr(item, "role", None) != "assistant" or not getattr(
+                item, "content", None
+            ):
                 continue
             for content in item.content:
                 for field in ("transcript", "text"):
@@ -323,7 +351,9 @@ class PatchedOpenAIRealtimeLLMService(OpenAIRealtimeLLMService):
                 return
 
             if not await self._recover_realtime_websocket(e, websocket):
-                await self.push_error(error_msg=f"Error sending client event: {e}", exception=e)
+                await self.push_error(
+                    error_msg=f"Error sending client event: {e}", exception=e
+                )
                 return
 
         await self._wait_for_session_ready(realtime_message)
@@ -362,7 +392,9 @@ class PatchedOpenAIRealtimeLLMService(OpenAIRealtimeLLMService):
 
         await self._websocket.send(json.dumps(realtime_message))
 
-    async def _recover_realtime_websocket(self, error: Exception, failed_websocket) -> bool:
+    async def _recover_realtime_websocket(
+        self, error: Exception, failed_websocket
+    ) -> bool:
         async with self._reconnect_lock:
             if self._disconnecting:
                 return False
@@ -370,7 +402,9 @@ class PatchedOpenAIRealtimeLLMService(OpenAIRealtimeLLMService):
             if self._websocket is not failed_websocket and self._websocket:
                 return True
 
-            logger.warning("OpenAI Realtime websocket send failed; reconnecting session: %s", error)
+            logger.warning(
+                "OpenAI Realtime websocket send failed; reconnecting session: %s", error
+            )
 
             receive_task = self._receive_task
             self._receive_task = None
@@ -416,11 +450,15 @@ class PatchedOpenAIRealtimeLLMService(OpenAIRealtimeLLMService):
             return
 
         deadline = asyncio.get_running_loop().time() + 5.0
-        while not self._api_session_ready and asyncio.get_running_loop().time() < deadline:
+        while (
+            not self._api_session_ready and asyncio.get_running_loop().time() < deadline
+        ):
             await asyncio.sleep(0.05)
 
         if not self._api_session_ready:
-            logger.warning("OpenAI Realtime session did not confirm readiness after reconnect")
+            logger.warning(
+                "OpenAI Realtime session did not confirm readiness after reconnect"
+            )
 
     @classmethod
     def _deep_merge(cls, target: dict, patch: dict):
@@ -433,7 +471,7 @@ class PatchedOpenAIRealtimeLLMService(OpenAIRealtimeLLMService):
 
 class Application:
     """Main application class using Pipecat."""
-    
+
     def __init__(self):
         """Initialize application."""
         self.websocket_handler: Optional[WebSocketHandler] = None
@@ -443,7 +481,7 @@ class Application:
         self.agent_registry: Optional[AgentRegistry] = None
         self.active_sessions: dict[str, dict] = {}
         self._server = None
-        
+
     async def initialize(self) -> None:
         """Initialize all components."""
         # Get configuration from environment
@@ -451,11 +489,13 @@ class Application:
         openai_api_key = os.environ.get("OPENAI_API_KEY")
         websocket_port = int(os.environ.get("WEBSOCKET_PORT", "8080"))
         websocket_host = os.environ.get("WEBSOCKET_HOST", "0.0.0.0")
-        client_metadata_timeout = float(os.environ.get("CLIENT_METADATA_TIMEOUT_SECONDS", "1.0"))
+        client_metadata_timeout = float(
+            os.environ.get("CLIENT_METADATA_TIMEOUT_SECONDS", "1.0")
+        )
         auto_disconnect_after_response_seconds = float(
             os.environ.get("AUTO_DISCONNECT_AFTER_RESPONSE_SECONDS", "5.0")
         )
-        
+
         # Get turn detection settings with defaults
         vad_threshold = float(os.environ.get("VAD_THRESHOLD", "0.5"))
         vad_prefix_padding_ms = int(os.environ.get("VAD_PREFIX_PADDING_MS", "300"))
@@ -463,46 +503,60 @@ class Application:
         vad_idle_timeout_ms = int(os.environ.get("VAD_IDLE_TIMEOUT_MS", "0"))
 
         # Get OpenAI Realtime settings with defaults
-        openai_realtime_model = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime-2")
+        openai_realtime_model = os.environ.get(
+            "OPENAI_REALTIME_MODEL", "gpt-realtime-2"
+        )
         openai_realtime_voice = os.environ.get("OPENAI_REALTIME_VOICE", "cedar").lower()
-        openai_transcription_model = os.environ.get("OPENAI_TRANSCRIPTION_MODEL", "gpt-realtime-whisper")
+        openai_transcription_model = os.environ.get("OPENAI_TRANSCRIPTION_MODEL", "")
         openai_noise_reduction = os.environ.get("OPENAI_NOISE_REDUCTION", "far_field")
-        
+
         # Get instructions with default
         instructions = os.environ.get("INSTRUCTIONS", DEFAULT_INSTRUCTIONS)
-        
+
         # Get recording setting (optional, defaults to false)
         enable_recording = os.environ.get("ENABLE_RECORDING", "false").lower() == "true"
-        
+
         # Get session reuse timeout and initialize session manager
-        session_reuse_timeout = float(os.environ.get("SESSION_REUSE_TIMEOUT_SECONDS", "300"))
+        session_reuse_timeout = float(
+            os.environ.get("SESSION_REUSE_TIMEOUT_SECONDS", "300")
+        )
         self.session_manager = SessionManager(reuse_timeout=session_reuse_timeout)
         logger.info(f"Session reuse timeout: {session_reuse_timeout} seconds")
-        
+
         if not openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable is required")
-        
+
         # Initialize Home Assistant MCP Service
         mcp_client = None
         try:
-            supervisor_token = os.environ.get("LONGLIVED_TOKEN") or os.environ.get("SUPERVISOR_TOKEN")
+            supervisor_token = os.environ.get("LONGLIVED_TOKEN") or os.environ.get(
+                "SUPERVISOR_TOKEN"
+            )
             ha_mcp_url = os.environ.get("HA_MCP_URL", "http://supervisor/core/api/mcp")
-            if supervisor_token:
+            if not ha_mcp_url:
+                logger.info(
+                    "HA_MCP_URL is blank, skipping Home Assistant MCP integration"
+                )
+            elif supervisor_token:
                 logger.info("Loading Home Assistant MCP tools...")
-                self.mcp_service = HomeAssistantMCPService(url=ha_mcp_url, access_token=supervisor_token)
+                self.mcp_service = HomeAssistantMCPService(
+                    url=ha_mcp_url, access_token=supervisor_token
+                )
                 mcp_client = await self.mcp_service.initialize()
                 logger.info("✅ Home Assistant MCP Client initialized")
             else:
-                logger.warning("⚠️ SUPERVISOR_TOKEN not set, skipping Home Assistant MCP integration")
+                logger.warning(
+                    "⚠️ SUPERVISOR_TOKEN not set, skipping Home Assistant MCP integration"
+                )
         except Exception as e:
             logger.warning(f"⚠️ Failed to initialize Home Assistant MCP Client: {e}")
-        
+
         # Initialize audio recording service (optional)
         self.audio_recording_service = AudioRecordingService(
             enable_recording=enable_recording,
             sample_rate=24000,
             chunk_duration_seconds=30,
-            output_dir="recordings"
+            output_dir="recordings",
         )
 
         # Initialize WebSocket handler
@@ -510,16 +564,18 @@ class Application:
             host=websocket_host,
             port=websocket_port,
             session_manager=self.session_manager,
-            audio_recording_service=self.audio_recording_service
+            audio_recording_service=self.audio_recording_service,
         )
-        
+
         # Store configuration for session creation
         self.realtime_ws_base_url = realtime_ws_base_url
         self.openai_api_key = openai_api_key
         self.websocket_host = websocket_host
         self.websocket_port = websocket_port
         self.client_metadata_timeout = client_metadata_timeout
-        self.auto_disconnect_after_response_seconds = auto_disconnect_after_response_seconds
+        self.auto_disconnect_after_response_seconds = (
+            auto_disconnect_after_response_seconds
+        )
         self.vad_threshold = vad_threshold
         self.vad_prefix_padding_ms = vad_prefix_padding_ms
         self.vad_silence_duration_ms = vad_silence_duration_ms
@@ -534,9 +590,11 @@ class Application:
             default_instructions=instructions,
             default_voice=openai_realtime_voice,
         )
-        
-        logger.info("✅ Application initialized - ready to accept WebSocket connections")
-    
+
+        logger.info(
+            "✅ Application initialized - ready to accept WebSocket connections"
+        )
+
     def _update_session_activity(self):
         """Update session activity timestamp (called by SessionActivityTracker)."""
         pass
@@ -578,12 +636,16 @@ class Application:
             return None
         return parsed if isinstance(parsed, dict) else None
 
-    async def _read_initial_metadata(self, websocket) -> tuple[dict[str, str], list[bytes | str]]:
+    async def _read_initial_metadata(
+        self, websocket
+    ) -> tuple[dict[str, str], list[bytes | str]]:
         metadata = self._metadata_from_path(websocket)
         pending_messages: list[bytes | str] = []
 
         try:
-            message = await asyncio.wait_for(websocket.recv(), timeout=self.client_metadata_timeout)
+            message = await asyncio.wait_for(
+                websocket.recv(), timeout=self.client_metadata_timeout
+            )
         except asyncio.TimeoutError:
             return metadata, pending_messages
         except Exception:
@@ -601,7 +663,9 @@ class Application:
         pending_messages.append(message)
         return metadata, pending_messages
 
-    def _extract_client_id(self, websocket, metadata: dict[str, str], agent: AgentProfile) -> str:
+    def _extract_client_id(
+        self, websocket, metadata: dict[str, str], agent: AgentProfile
+    ) -> str:
         remote_host = None
         remote = getattr(websocket, "remote_address", None)
         if isinstance(remote, tuple) and remote:
@@ -624,7 +688,8 @@ class Application:
         if not mcp_tools_schema:
             return None
         filtered_tools = [
-            tool for tool in mcp_tools_schema.standard_tools
+            tool
+            for tool in mcp_tools_schema.standard_tools
             if agent.allows_tool(tool.name)
         ]
         return ToolsSchema(
@@ -642,7 +707,9 @@ class Application:
         on_user_started_speaking: Optional[Callable[[], object]] = None,
     ) -> OpenAIRealtimeLLMService:
         """Create a new OpenAI Realtime service for one client connection."""
-        logger.info("🆕 Creating OpenAI session for %s using agent '%s'", client_id, agent.name)
+        logger.info(
+            "🆕 Creating OpenAI session for %s using agent '%s'", client_id, agent.name
+        )
 
         if self.session_manager:
             self.session_manager.cleanup_before_new_session(client_id)
@@ -665,9 +732,13 @@ class Application:
         filtered_mcp_tools_schema = None
         if self.mcp_client:
             try:
-                logger.info("🔧 Fetching MCP tool definitions for agent '%s'...", agent.name)
+                logger.info(
+                    "🔧 Fetching MCP tool definitions for agent '%s'...", agent.name
+                )
                 mcp_tools_schema = await self.mcp_client.get_tools_schema()
-                filtered_mcp_tools_schema = self._filter_mcp_tools(mcp_tools_schema, agent)
+                filtered_mcp_tools_schema = self._filter_mcp_tools(
+                    mcp_tools_schema, agent
+                )
 
                 for function_schema in filtered_mcp_tools_schema.standard_tools:
                     all_tools.append(
@@ -698,8 +769,10 @@ class Application:
             audio=AudioConfiguration(
                 input=AudioInput(
                     format=PCMAudioFormat(),
-                    transcription=InputAudioTranscription(
-                        model=self.openai_transcription_model
+                    transcription=(
+                        InputAudioTranscription(model=self.openai_transcription_model)
+                        if self.openai_transcription_model
+                        else None
                     ),
                     noise_reduction=InputAudioNoiseReduction(
                         type=self.openai_noise_reduction
@@ -713,7 +786,7 @@ class Application:
                 ),
                 output=AudioOutput(
                     format=PCMAudioFormat(),
-                    voice=agent.voice,
+                    voice=agent.voice or None,
                 ),
             ),
             tools=all_tools,
@@ -758,13 +831,17 @@ class Application:
 
         service.register_function(
             "disconnect_client",
-            create_disconnect_tool_handler(disconnect_callback=disconnect_client_callback),
+            create_disconnect_tool_handler(
+                disconnect_callback=disconnect_client_callback
+            ),
         )
         logger.info("✅ Registered disconnect tool handler for %s", client_id)
 
         if self.mcp_client and filtered_mcp_tools_schema:
             try:
-                await self.mcp_client.register_tools_schema(filtered_mcp_tools_schema, service)
+                await self.mcp_client.register_tools_schema(
+                    filtered_mcp_tools_schema, service
+                )
                 logger.info(
                     "✅ Registered %s MCP tool handlers for %s",
                     len(filtered_mcp_tools_schema.standard_tools),
@@ -787,7 +864,11 @@ class Application:
     ):
         data = self._parse_control_message(message)
         if not data:
-            logger.debug("📨 Received non-JSON text message from %s: %s", client_id, message[:100])
+            logger.debug(
+                "📨 Received non-JSON text message from %s: %s",
+                client_id,
+                message[:100],
+            )
             return
 
         message_type = data.get("type")
@@ -806,7 +887,12 @@ class Application:
             else:
                 logger.warning("⚠️ No interrupt method found for service %s", client_id)
         except Exception as e:
-            logger.error("❌ Error sending interrupt to OpenAI service for %s: %s", client_id, e, exc_info=True)
+            logger.error(
+                "❌ Error sending interrupt to OpenAI service for %s: %s",
+                client_id,
+                e,
+                exc_info=True,
+            )
 
     async def _handle_client(self, websocket):
         metadata, initial_messages = await self._read_initial_metadata(websocket)
@@ -849,6 +935,7 @@ class Application:
 
         auto_disconnect = None
         if self.auto_disconnect_after_response_seconds >= 0:
+
             async def disconnect_after_response():
                 await transport.disconnect_client(reason="assistant_response_complete")
 
@@ -864,9 +951,11 @@ class Application:
             transport=transport,
             on_final_response_done=auto_disconnect.arm if auto_disconnect else None,
             on_user_started_speaking=(
-                lambda: auto_disconnect.cancel_pending("user speech")
-                if auto_disconnect
-                else None
+                lambda: (
+                    auto_disconnect.cancel_pending("user speech")
+                    if auto_disconnect
+                    else None
+                )
             ),
         )
         service_holder["service"] = service
@@ -908,13 +997,17 @@ class Application:
                 await run_task
             self.active_sessions.pop(client_id, None)
             logger.info("🔌 Client %s disconnected", client_id)
-    
+
     async def run(self) -> None:
         """Run the application."""
         await self.initialize()
 
         try:
-            logger.info("✅ Starting multi-client WebSocket server on %s:%s", self.websocket_host, self.websocket_port)
+            logger.info(
+                "✅ Starting multi-client WebSocket server on %s:%s",
+                self.websocket_host,
+                self.websocket_port,
+            )
             async with websocket_serve(
                 self._handle_client,
                 self.websocket_host,
@@ -931,7 +1024,7 @@ class Application:
             raise
         finally:
             await self.cleanup()
-    
+
     async def cleanup(self) -> None:
         """Cleanup resources."""
         logger.info("Cleaning up application...")
@@ -945,17 +1038,23 @@ class Application:
             if recording_session:
                 recording_session.stop()
             self.active_sessions.pop(client_id, None)
-        
+
         if self.audio_recording_service:
             self.audio_recording_service.cleanup()
-        
+
+        # if self.mcp_service:
+        #     try:
+        #         await self.mcp_service.close()
+        #     except Exception as e:
+        #         logger.warning("⚠️ Error closing Home Assistant MCP client: %s", e)
+
         logger.info("✅ Application cleanup complete")
 
 
 async def main() -> None:
     """Main entry point."""
     app = Application()
-    
+
     try:
         await app.run()
     except KeyboardInterrupt:

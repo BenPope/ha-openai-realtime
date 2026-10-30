@@ -1,19 +1,17 @@
 {
-  "name": "Home Assistant Add-on Development",
-  "image": "ghcr.io/home-assistant/devcontainer-addon:latest",
-  "features": {},
-  "forwardPorts": [7123, 8080],
-  "portsAttributes": {
-    "7123": {
-      "label": "Home Assistant",
-      "onAutoForward": "notify"
-    },
-    "8080": {
-      "label": "WebRTC Server",
-      "onAutoForward": "ignore"
-    }
+  "name": "OpenAI Realtime Voice Agent",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
   },
-  "postCreateCommand": "pip3 install -r requirements.txt",
+  "appPort": [
+    "8081:8081"
+  ],
+  "forwardPorts": [
+    8081
+  ],
+  "postCreateCommand": "poetry install",
+  "remoteUser": "root",
   "customizations": {
     "vscode": {
       "extensions": [
@@ -21,16 +19,8 @@
         "ms-python.vscode-pylance"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/usr/bin/python3",
-        "python.linting.enabled": true,
-        "python.linting.pylintEnabled": false,
-        "python.linting.flake8Enabled": true
+        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
       }
     }
-  },
-  "remoteUser": "root"
+  }
 }
-
-
-
-

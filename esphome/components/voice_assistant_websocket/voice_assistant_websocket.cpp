@@ -20,9 +20,6 @@ void VoiceAssistantWebSocket::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Voice Assistant WebSocket...");
   this->input_buffer_.reserve(INPUT_BUFFER_SIZE);
   this->output_buffer_.reserve(4096);  // Reserve space for output buffer
-  this->mono_buffer_.reserve(INPUT_BUFFER_SIZE / 2);  // Reserve for mono conversion (input)
-  this->resampled_buffer_.reserve(INPUT_BUFFER_SIZE * 3 / 2); // 1.5x upsampling for 16kHz -> 24kHz
-  this->output_stereo_buffer_.reserve(4096 * 2);  // Reserve for output processing (24kHz mono -> 48kHz stereo)
   this->state_ = VOICE_ASSISTANT_WEBSOCKET_IDLE;
   
   // Register microphone data callback
@@ -552,49 +549,8 @@ void VoiceAssistantWebSocket::on_microphone_data_(
   }
 
   // Input: 16 kHz, signed 16-bit, mono PCM
-  if (data.empty() || data.size() % sizeof(int16_t) != 0) {
-    return;
-  }
-
-  const size_t input_samples = data.size() / sizeof(int16_t);
-
-  // Decode the PCM bytes into signed 16-bit samples.
-  this->mono_buffer_.resize(input_samples);
-  std::memcpy(
-      this->mono_buffer_.data(),
-      data.data(),
-      data.size()
-  );
-
-  // Resample 16 kHz -> 24 kHz (ratio 3:2).
-  const size_t output_samples =
-      input_samples * INPUT_SAMPLE_RATE / MICROPHONE_SAMPLE_RATE;
-
-  this->resampled_buffer_.resize(output_samples);
-
-  for (size_t i = 0; i < output_samples; ++i) {
-    // Exact fractional source position: i * 2 / 3
-    const size_t numerator = i * MICROPHONE_SAMPLE_RATE;
-    const size_t idx = numerator / INPUT_SAMPLE_RATE;
-    const float fraction =
-        float(numerator % INPUT_SAMPLE_RATE) / INPUT_SAMPLE_RATE;
-
-    const int32_t a = this->mono_buffer_[idx];
-    const int32_t b = this->mono_buffer_[
-        std::min(idx + 1, input_samples - 1)
-    ];
-
-    this->resampled_buffer_[i] =
-        static_cast<int16_t>(a + (b - a) * fraction);
-  }
-
   // send_audio_chunk_ expects BYTES, not samples.
-  this->send_audio_chunk_(
-      reinterpret_cast<const uint8_t *>(
-          this->resampled_buffer_.data()
-      ),
-      output_samples * sizeof(int16_t)
-  );
+  this->send_audio_chunk_(data.data(), data.size());
 }
 
 bool VoiceAssistantWebSocket::is_bot_speaking() const {

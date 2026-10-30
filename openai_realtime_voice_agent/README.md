@@ -34,8 +34,8 @@ Configure the addon in Home Assistant:
    - `vad_silence_duration_ms`: Duration of silence before stopping in milliseconds (default: 500)
    - `vad_idle_timeout_ms`: Idle timeout before the Realtime session prompts again (default: 10000)
    - `openai_realtime_model`: OpenAI Realtime model (default: `gpt-realtime-2`)
-   - `openai_realtime_voice`: OpenAI Realtime voice (default: `cedar`)
-   - `openai_transcription_model`: Input transcription model (default: `gpt-realtime-whisper`)
+   - `openai_realtime_voice`: Optional output voice override; leave blank to let a compatible Realtime backend choose its default
+   - `openai_transcription_model`: Optional separate input transcription model; leave blank when the Realtime model handles audio input itself
    - `openai_noise_reduction`: Input noise reduction (`near_field` or `far_field`, default: `far_field`)
    - `instructions`: Custom instructions for the AI assistant (default: English smart-home assistant)
    - `default_agent`: Agent route used when no wake word or agent route is provided (default: `default`)
@@ -72,6 +72,16 @@ Example `agents_json` for future voice/tool differences:
   }
 }
 ```
+
+### Local development
+
+For development, run the workspace app directly; you do not need to install the Home Assistant add-on or publish a container image. The dev container publishes port `8080` on its host for LAN clients. Reopen/rebuild the dev container once after adding that port mapping.
+
+```bash
+poetry run python -c 'import asyncio; from app.main import main; asyncio.run(main())'
+```
+
+Importing the app loads the `options` section into its environment, while explicitly set environment variables take precedence. Set `ha_mcp_url` in `config.yaml` to your Home Assistant LAN address, and set `longlived_token` to a Home Assistant long-lived access token. Point your voice clients at `ws://<dev-machine-lan-ip>:8080` and allow inbound TCP port `8080` through the dev machine's firewall. `bash root/run-dev.sh` is an equivalent launcher; use `bash root/run-dev.sh --check` to validate config loading without starting the app.
 
 ## Updates
 

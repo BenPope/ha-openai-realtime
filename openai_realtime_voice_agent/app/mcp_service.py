@@ -22,7 +22,7 @@ class HomeAssistantMCPService:
         self.mcp_client: Optional[MCPClient] = None
         
     async def initialize(self) -> MCPClient:
-        """Initialize and return the MCP client."""
+        """Connect to Home Assistant and return the MCP client."""
         try:
             logger.info(f"🔗 Initializing Home Assistant MCP Client at {self.url}")
             
@@ -36,13 +36,20 @@ class HomeAssistantMCPService:
             
             # Create MCP client
             self.mcp_client = MCPClient(server_params=server_params)
+            await self.mcp_client.start()
             
-            logger.info("✅ Home Assistant MCP Client initialized")
+            logger.info("✅ Home Assistant MCP Client connected")
             return self.mcp_client
             
         except Exception as e:
             logger.error(f"❌ Failed to initialize Home Assistant MCP Client: {e}", exc_info=True)
             raise
+
+    async def close(self) -> None:
+        """Close the persistent MCP connection, if initialized."""
+        if self.mcp_client:
+            await self.mcp_client.close()
+            self.mcp_client = None
     
     def get_client(self) -> Optional[MCPClient]:
         """Get the MCP client instance."""

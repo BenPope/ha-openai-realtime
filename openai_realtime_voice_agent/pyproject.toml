@@ -1,14 +1,15 @@
 [tool.poetry]
 name = "openai-realtime-voice-agent"
-version = "0.2.10"
+version = "0.2.12"
 description = "Home Assistant addon for OpenAI Realtime API voice control with WebSocket support using Pipecat"
 authors = ["Ben Pope"]
 packages = [{ include = "app", from = "." }]
 
 [tool.poetry.dependencies]
-python = ">=3.11,<3.14"
-pipecat-ai = { extras = ["mcp", "openai", "websocket"], version = ">=1.14.0" }
+python = ">=3.12,<3.15"
+pipecat-ai = { extras = ["mcp", "openai", "websocket"], version = ">=1.15.0" }
 python-dotenv = ">=1.0.0"
+pyyaml = ">=6,<7"
 fastapi = ">=0.162.0"
 uvicorn = { extras = ["standard"], version = ">=0.54.0" }
 websockets = ">=17.3"
